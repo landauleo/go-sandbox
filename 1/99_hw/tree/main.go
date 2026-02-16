@@ -61,7 +61,7 @@ func print(out io.Writer, files bool, path string, prefix string) {
 			result = fmt.Sprintf("%s%s%s\n", prefix, tab, item.Name()) //тут префикс от родителя!!!
 		} else {
 			info, _ := item.Info()
-			var size = info.Size()
+			size := info.Size()
 			var sizeStr string
 			if size == 0 {
 				sizeStr = "empty"
@@ -80,6 +80,7 @@ func print(out io.Writer, files bool, path string, prefix string) {
 			newPrefix += "│\t"
 		}
 
+		res.Close()
 		print(out, files, path+"/"+item.Name(), newPrefix)
 	}
 
