@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -27,7 +28,10 @@ func dirTree(out io.Writer, path string, files bool) error {
 }
 
 func print(out io.Writer, files bool, path string, prefix string) {
-	res, _ := os.Open(path)
+	res, err := os.Open(path)
+	if err != nil {
+		fmt.Println("open failed: %w", err)
+	}
 	if res == nil {
 		return
 	}
@@ -62,10 +66,8 @@ func print(out io.Writer, files bool, path string, prefix string) {
 		} else {
 			info, _ := item.Info()
 			size := info.Size()
-			var sizeStr string
-			if size == 0 {
-				sizeStr = "empty"
-			} else {
+			sizeStr := "empty"
+			if size != 0 {
 				sizeStr = fmt.Sprintf("%db", info.Size())
 			}
 			result = fmt.Sprintf("%s%s%s (%s)\n", prefix, tab, item.Name(), sizeStr) //тут префикс от родителя!!!
@@ -81,7 +83,7 @@ func print(out io.Writer, files bool, path string, prefix string) {
 		}
 
 		res.Close()
-		print(out, files, path+"/"+item.Name(), newPrefix)
+		print(out, files, filepath.Join(path, item.Name()), newPrefix)
 	}
 
 }
