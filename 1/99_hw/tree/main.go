@@ -82,7 +82,10 @@ func print(out io.Writer, files bool, path string, prefix string) {
 			newPrefix += "│\t"
 		}
 
-		res.Close()
+		err := res.Close()
+		if err != nil {
+			return
+		}
 		print(out, files, filepath.Join(path, item.Name()), newPrefix)
 	}
 
