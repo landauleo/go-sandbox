@@ -34,22 +34,62 @@ func ExecutePipeline(jobs ...job) {
 
 // считает значение crc32(data)+"~"+crc32(md5(data)) ( конкатенация двух строк через ~), где data - то что пришло на вход (по сути - числа из первой функции)
 func SingleHash(in chan interface{}, out chan interface{}) {
+	wg := &sync.WaitGroup{}
+
 	for data := range in {
-		res := DataSignerCrc32(strconv.Itoa(data.(int))) + "~" + DataSignerCrc32(DataSignerMd5(strconv.Itoa(data.(int))))
-		out <- res
+		wg.Add(1)
+
+		dataStr := strconv.Itoa(data.(int))
+
+		//DataSignerMd5 может одновременно вызываться только 1 раз, считается 10 мс.
+		//Если одновременно запустится несколько - будет перегрев на 1 сек -> не запускаем параллельно
+		md5 := DataSignerMd5(dataStr)
+
+		go func(data string, md5 string) {
+			defer wg.Done()
+			// crc32(data) и crc32(md5(data)) параллельно
+			var crc32Result string
+			crc32Chan := make(chan string) //можно не закрывать, так как после одного вызова GC его утилизирует
+			//точнее отправили вычислять результат crc32(data) отдельной горутиной
+			go func() {
+				crc32Chan <- DataSignerCrc32(data)
+			}()
+
+			crc32Md5Result := DataSignerCrc32(md5)
+			crc32Result = <-crc32Chan
+			out <- crc32Result + "~" + crc32Md5Result
+		}(dataStr, md5)
 	}
+	wg.Wait()
 }
 
 // считает значение crc32(th+data)) (конкатенация цифры, приведённой к строке и строки), где th=0..5 ( т.е. 6 хешей на
 // каждое входящее значение ), потом берёт конкатенацию результатов в порядке расчета (0..5), где data - то что пришло на вход (и ушло на выход из SingleHash)
 func MultiHash(in chan interface{}, out chan interface{}) {
+	externalWg := &sync.WaitGroup{}
+
 	for data := range in {
-		for i := range 5 {
-			arg := strconv.Itoa(i) + data.(string) //нельзя(!!!) так просто взять и сложить всё сразу в строке ниже
-			res := DataSignerCrc32(arg)
-			out <- res
-		}
+		externalWg.Add(1)
+		//передаем data как аргумент, чтобы "заморозить" её значение для каждой конкретной горутины
+		go func(dataItem interface{}) {
+			defer externalWg.Done()
+			var multiHashResult string
+			multiHashSlice := make([]string, 6) //Slice -> динамический массив, самый популярный для работы со списками инструмент
+			internalWg := &sync.WaitGroup{}
+			for i := range 6 {
+				internalWg.Add(1)
+				go func(index int) {
+					defer internalWg.Done()
+					arg := strconv.Itoa(index) + dataItem.(string) //нельзя(!!!) так просто взять и сложить всё сразу в строке ниже
+					multiHashSlice[index] = DataSignerCrc32(arg)
+				}(i)
+			}
+			internalWg.Wait()
+			multiHashResult = strings.Join(multiHashSlice, "")
+			out <- multiHashResult
+		}(data)
 	}
+	externalWg.Wait()
 }
 
 // получает все результаты, сортирует (https://golang.org/pkg/sort/), объединяет отсортированный результат через _ (символ подчеркивания) в одну строку
