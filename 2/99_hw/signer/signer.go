@@ -55,24 +55,20 @@ func SingleHash(in chan interface{}, out chan interface{}) {
         // тут начинается распараллеливание
 		go func(data string, md5 string) {
 			defer wg.Done()
-			// crc32(data) и crc32(md5(data)) параллельно высчитываются
-			crc32Md5Result := DataSignerCrc32(md5)
-			//crc32(data) ещё и в отдельной горутине
-			crc32Result = <-getCrc32Chan(data)
-			out <- crc32Result + "~" + crc32Md5Result
-		}(dataStr, md5)
-	}
-	wg.Wait()
-}
-
-func getCrc32Chan(data string) chan string {
-		crc32Chan := make(chan string) //можно не закрывать, так как после одного вызова GC его утилизирует, видя, что канал стал недосягаемым
+			// crc32(data) и crc32(md5(data)) параллельно
+			var crc32Result string
+			crc32Chan := make(chan string) //можно не закрывать, так как после одного вызова GC его утилизирует
 			// отправили вычислять результат crc32(data) отдельной горутиной
 			go func() {
 				crc32Chan <- DataSignerCrc32(data)
 			}()
 
-	    return crc32Chan;
+			crc32Md5Result := DataSignerCrc32(md5)
+			crc32Result = <-crc32Chan
+			out <- crc32Result + "~" + crc32Md5Result
+		}(dataStr, md5)
+	}
+	wg.Wait()
 }
 
 // считает значение crc32(th+data)) (конкатенация цифры, приведённой к строке и строки), где th=0..5 ( т.е. 6 хешей на
@@ -85,7 +81,6 @@ func MultiHash(in chan interface{}, out chan interface{}) {
 		//передаем data как аргумент, чтобы "заморозить" её значение для каждой конкретной горутины
 		go func(dataItem interface{}) {
 			defer externalWg.Done()
-			var multiHashResult string
 			multiHashSlice := make([]string, 6) //Slice -> динамический массив, самый популярный для работы со списками инструмент
 			internalWg := &sync.WaitGroup{}
 			for i := range 6 {
