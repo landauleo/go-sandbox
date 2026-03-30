@@ -9,7 +9,9 @@ import (
 
 // обеспечивает нам конвейерную обработку функций-воркеров, которые что-то делают
 func ExecutePipeline(jobs ...job) {
-	wg := &sync.WaitGroup{} //нужен именно указатель, чтобы не передалась копия счётчика (в Go по дефолту передается всё по значению)
+	//можно было использовать и указатель, но так проще и указатель нужен только при передаче wg как аргумент
+	// куда-то, а в текущем кейсе работает свойство замыкания - доступ ко всем переменным (по ссылке)
+	wg := sync.WaitGroup{}
 	in := make(chan interface{})
 
 	for _, jobItem := range jobs {
@@ -35,7 +37,7 @@ func ExecutePipeline(jobs ...job) {
 var md5mutex sync.Mutex
 // считает значение crc32(data)+"~"+crc32(md5(data)) ( конкатенация двух строк через ~), где data - то что пришло на вход (по сути - числа из первой функции)
 func SingleHash(in chan interface{}, out chan interface{}) {
-	wg := &sync.WaitGroup{}
+	wg := sync.WaitGroup{}
 
 	for data := range in {
 		wg.Add(1)
@@ -48,6 +50,7 @@ func SingleHash(in chan interface{}, out chan interface{}) {
 		md5 := DataSignerMd5(dataStr)
 		md5mutex.Unlock()
 
+        // тут начинается распараллеливание
 		go func(data string, md5 string) {
 			defer wg.Done()
 			// crc32(data) и crc32(md5(data)) параллельно
@@ -69,7 +72,7 @@ func SingleHash(in chan interface{}, out chan interface{}) {
 // считает значение crc32(th+data)) (конкатенация цифры, приведённой к строке и строки), где th=0..5 ( т.е. 6 хешей на
 // каждое входящее значение ), потом берёт конкатенацию результатов в порядке расчета (0..5), где data - то что пришло на вход (и ушло на выход из SingleHash)
 func MultiHash(in chan interface{}, out chan interface{}) {
-	externalWg := &sync.WaitGroup{}
+	externalWg := sync.WaitGroup{}
 
 	for data := range in {
 		externalWg.Add(1)
