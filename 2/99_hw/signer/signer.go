@@ -14,7 +14,7 @@ func ExecutePipeline(jobs ...job) {
 
 	for _, jobItem := range jobs {
 		wg.Add(1)
-		//чтобы передавать результаты выполнения текущей ф-ии в следующую, а не устраивать помоймку
+		//чтобы передавать результаты выполнения текущей ф-ии в следующую, а не устраивать помойку
 		out := make(chan interface{})
 
 		// про анонимную функцию я не догадалась сама, это AI подсказал, я бы точно не дошла,
@@ -88,8 +88,7 @@ func MultiHash(in chan interface{}, out chan interface{}) {
 				}(i)
 			}
 			internalWg.Wait()
-			multiHashResult = strings.Join(multiHashSlice, "")
-			out <- multiHashResult
+			out <- strings.Join(multiHashSlice, "")
 		}(data)
 	}
 	externalWg.Wait()
