@@ -34,6 +34,8 @@ func ExecutePipeline(jobs ...job) {
 	wg.Wait() //блокирует выполнение кода, пока счетчики не будет 0
 }
 
+//это чтобы DataSignerMd5 не запускался параллельно, если объявить внутри SingleHash, то параллельные вызовы
+// SingleHash всё сломают
 var md5mutex sync.Mutex
 // считает значение crc32(data)+"~"+crc32(md5(data)) ( конкатенация двух строк через ~), где data - то что пришло на вход (по сути - числа из первой функции)
 func SingleHash(in chan interface{}, out chan interface{}) {
@@ -53,20 +55,24 @@ func SingleHash(in chan interface{}, out chan interface{}) {
         // тут начинается распараллеливание
 		go func(data string, md5 string) {
 			defer wg.Done()
-			// crc32(data) и crc32(md5(data)) параллельно
-			var crc32Result string
-			crc32Chan := make(chan string) //можно не закрывать, так как после одного вызова GC его утилизирует
-			//точнее отправили вычислять результат crc32(data) отдельной горутиной
-			go func() {
-				crc32Chan <- DataSignerCrc32(data)
-			}()
-
+			// crc32(data) и crc32(md5(data)) параллельно высчитываются
 			crc32Md5Result := DataSignerCrc32(md5)
-			crc32Result = <-crc32Chan
+			//crc32(data) ещё и в отдельной горутине
+			crc32Result = <-getCrc32Chan(data)
 			out <- crc32Result + "~" + crc32Md5Result
 		}(dataStr, md5)
 	}
 	wg.Wait()
+}
+
+func getCrc32Chan(data string) chan string {
+		crc32Chan := make(chan string) //можно не закрывать, так как после одного вызова GC его утилизирует, видя, что канал стал недосягаемым
+			// отправили вычислять результат crc32(data) отдельной горутиной
+			go func() {
+				crc32Chan <- DataSignerCrc32(data)
+			}()
+
+	    return crc32Chan;
 }
 
 // считает значение crc32(th+data)) (конкатенация цифры, приведённой к строке и строки), где th=0..5 ( т.е. 6 хешей на
