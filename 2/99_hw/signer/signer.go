@@ -32,6 +32,7 @@ func ExecutePipeline(jobs ...job) {
 	wg.Wait() //блокирует выполнение кода, пока счетчики не будет 0
 }
 
+var md5mutex sync.Mutex
 // считает значение crc32(data)+"~"+crc32(md5(data)) ( конкатенация двух строк через ~), где data - то что пришло на вход (по сути - числа из первой функции)
 func SingleHash(in chan interface{}, out chan interface{}) {
 	wg := &sync.WaitGroup{}
@@ -43,7 +44,9 @@ func SingleHash(in chan interface{}, out chan interface{}) {
 
 		//DataSignerMd5 может одновременно вызываться только 1 раз, считается 10 мс.
 		//Если одновременно запустится несколько - будет перегрев на 1 сек -> не запускаем параллельно
+	    md5mutex.Lock()
 		md5 := DataSignerMd5(dataStr)
+		md5mutex.Unlock()
 
 		go func(data string, md5 string) {
 			defer wg.Done()
