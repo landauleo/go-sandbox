@@ -87,7 +87,8 @@ func MultiHash(in chan interface{}, out chan interface{}) {
 				internalWg.Add(1)
 				go func(index int) {
 					defer internalWg.Done()
-					arg := strconv.Itoa(index) + dataItem.(string) //нельзя(!!!) так просто взять и сложить всё сразу в строке ниже
+					casted,_ := dataItem.(string)
+					arg := strconv.Itoa(index) + casted //нельзя(!!!) так просто взять и сложить всё сразу в строке ниже
 					multiHashSlice[index] = DataSignerCrc32(arg)
 				}(i)
 			}
@@ -102,7 +103,8 @@ func MultiHash(in chan interface{}, out chan interface{}) {
 func CombineResults(in chan interface{}, out chan interface{}) {
 	var resultStrings []string
 	for data := range in {
-		resultStrings = append(resultStrings, data.(string))
+    	casted, _ := data.(string) //если закастить не удалось, программа не падает, а записывает в переменную пустое значение
+		resultStrings = append(resultStrings, casted)
 	}
 
 	sort.Strings(resultStrings)
