@@ -34,41 +34,38 @@ func ExecutePipeline(jobs ...job) {
 	wg.Wait() //блокирует выполнение кода, пока счетчики не будет 0
 }
 
-//это чтобы DataSignerMd5 не запускался параллельно, если объявить внутри SingleHash, то параллельные вызовы
+// это чтобы DataSignerMd5 не запускался параллельно, если объявить внутри SingleHash, то параллельные вызовы
 // SingleHash всё сломают
 var md5mutex sync.Mutex
+
 // считает значение crc32(data)+"~"+crc32(md5(data)) ( конкатенация двух строк через ~), где data - то что пришло на вход (по сути - числа из первой функции)
 func SingleHash(in chan interface{}, out chan interface{}) {
 	wg := sync.WaitGroup{}
 
 	for data := range in {
 		wg.Add(1)
-
-		dataStr := strconv.Itoa(data.(int))
+		casted, _ := data.(int)
+		dataStr := strconv.Itoa(casted)
 
 		//DataSignerMd5 может одновременно вызываться только 1 раз, считается 10 мс.
 		//Если одновременно запустится несколько - будет перегрев на 1 сек -> не запускаем параллельно
-	    md5mutex.Lock()
+		md5mutex.Lock()
 		md5 := DataSignerMd5(dataStr)
 		md5mutex.Unlock()
 
-        // тут начинается распараллеливание
-		go func(data string, md5 string) {
-			defer wg.Done()
-			// crc32(data) и crc32(md5(data)) параллельно
-			var crc32Result string
-			crc32Chan := make(chan string) //можно не закрывать, так как после одного вызова GC его утилизирует
-			// отправили вычислять результат crc32(data) отдельной горутиной
-			go func() {
-				crc32Chan <- DataSignerCrc32(data)
-			}()
-
-			crc32Md5Result := DataSignerCrc32(md5)
-			crc32Result = <-crc32Chan
-			out <- crc32Result + "~" + crc32Md5Result
-		}(dataStr, md5)
+		// тут начинается распараллеливание
+		calculateCrc32Result(wg, out, dataStr, md5)
 	}
 	wg.Wait()
+}
+
+func calculateCrc32Result(wg sync.WaitGroup, out chan interface{}, dataStr string, md5 string) {
+	go func(data string, md5 string) {
+		defer wg.Done()
+		crc32Md5Result := DataSignerCrc32(md5)
+		crc32Result := DataSignerCrc32(data)
+		out <- crc32Result + "~" + crc32Md5Result
+	}(dataStr, md5)
 }
 
 // считает значение crc32(th+data)) (конкатенация цифры, приведённой к строке и строки), где th=0..5 ( т.е. 6 хешей на
@@ -79,31 +76,35 @@ func MultiHash(in chan interface{}, out chan interface{}) {
 	for data := range in {
 		externalWg.Add(1)
 		//передаем data как аргумент, чтобы "заморозить" её значение для каждой конкретной горутины
-		go func(dataItem interface{}) {
-			defer externalWg.Done()
-			multiHashSlice := make([]string, 6) //Slice -> динамический массив, самый популярный для работы со списками инструмент
-			internalWg := &sync.WaitGroup{}
-			for i := range 6 {
-				internalWg.Add(1)
-				go func(index int) {
-					defer internalWg.Done()
-					casted,_ := dataItem.(string)
-					arg := strconv.Itoa(index) + casted //нельзя(!!!) так просто взять и сложить всё сразу в строке ниже
-					multiHashSlice[index] = DataSignerCrc32(arg)
-				}(i)
-			}
-			internalWg.Wait()
-			out <- strings.Join(multiHashSlice, "")
-		}(data)
+		calculateMultiHashSlice(externalWg, out, data)
 	}
 	externalWg.Wait()
+}
+
+func calculateMultiHashSlice(externalWg sync.WaitGroup, out chan interface{}, data interface{}) {
+	go func(dataItem interface{}) {
+		defer externalWg.Done()
+		multiHashSlice := make([]string, 6) //Slice -> динамический массив, самый популярный для работы со списками инструмент
+		internalWg := &sync.WaitGroup{}
+		for i := range 6 {
+			internalWg.Add(1)
+			go func(index int) {
+				defer internalWg.Done()
+				casted, _ := dataItem.(string)
+				arg := strconv.Itoa(index) + casted //нельзя(!!!) так просто взять и сложить всё сразу в строке ниже
+				multiHashSlice[index] = DataSignerCrc32(arg)
+			}(i)
+		}
+		internalWg.Wait()
+		out <- strings.Join(multiHashSlice, "")
+	}(data)
 }
 
 // получает все результаты, сортирует (https://golang.org/pkg/sort/), объединяет отсортированный результат через _ (символ подчеркивания) в одну строку
 func CombineResults(in chan interface{}, out chan interface{}) {
 	var resultStrings []string
 	for data := range in {
-    	casted, _ := data.(string) //если закастить не удалось, программа не падает, а записывает в переменную пустое значение
+		casted, _ := data.(string) //если закастить не удалось, программа не падает, а записывает в переменную пустое значение
 		resultStrings = append(resultStrings, casted)
 	}
 
